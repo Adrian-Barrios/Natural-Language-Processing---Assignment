@@ -1,0 +1,49 @@
+You are strictly prohibited from submitting solutions based on zero-shot models such as ChatGPT, Gemini, Claude, or similar tools that require no fine-tuning, retraining, or substantial adaptation. Submissions must involve substantial modification and not merely prompt engineering. You are allowed to perform fine-tuning of pretrained models
+
+You can use tools like ChatGPT, Gemini, etc. for inspiration and coding.
+
+Grading Criteria (5 points total)
+
+1. Competition Public Score (1.5 points)  
+
+Target: ROC-AUC-score ≥ 0.91  
+
+Minimum threshold: 0.86  
+
+Grading formula:  
+
+score = min(1.5, max(0, (public_score - 0.86) / 0.05)) * 1.5  
+
+2. Private Leaderboard Rank (1 point)  
+
+Grading formula:  
+
+score = min(1, max(0, 1 * (private_score - P10) / (P90 - P10)))  
+
+P10 and P90 are the percentile 10 and 90, respectively
+
+3. Code Quality (1 point)  
+
+- Code must run without errors  
+
+- Clear structure and readability  
+
+- Proper use of functions and modular design  
+
+No points will be awarded if the inference notebook does not execute correctly.
+
+4. Report (1.5 points)  
+
+- Clear explanation of methodology  
+
+- Well-organized experiments  
+
+- Insightful analysis of results  
+
+Evaluation Process  
+
+The instructor will:
+
+- Run your notebooks  
+
+- Test your predict_emotion function  
