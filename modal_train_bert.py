@@ -67,14 +67,15 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
     print(f"Device: {device}")
 
     train_df = pd.read_csv("/data/train_kaggle.csv")
+    test_df = pd.read_csv("/data/test_kaggle.csv")
     emotion_cols = [c for c in train_df.columns if c not in ("ID", "text")]
     num_labels = len(emotion_cols)
-    print(f"Train={len(train_df)}  Labels={num_labels}")
+    print(f"Train={len(train_df)}  Test={len(test_df)}  Labels={num_labels}")
 
     tokenizer = AutoTokenizer.from_pretrained(PRETRAINED)
 
     class EmotionDataset(Dataset):
-        def __init__(self, df):
+        def __init__(self, df, is_test=False):
             enc = tokenizer(
                 df["text"].astype(str).tolist(),
                 padding="max_length",
@@ -84,19 +85,23 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
             )
             self.input_ids = enc["input_ids"]
             self.attention_mask = enc["attention_mask"]
-            self.labels = torch.tensor(
-                df[emotion_cols].values.astype(np.float32), dtype=torch.float32
-            )
+            self.is_test = is_test
+            if not is_test:
+                self.labels = torch.tensor(
+                    df[emotion_cols].values.astype(np.float32), dtype=torch.float32
+                )
 
         def __len__(self):
             return self.input_ids.size(0)
 
         def __getitem__(self, idx):
-            return {
+            item = {
                 "input_ids": self.input_ids[idx],
                 "attention_mask": self.attention_mask[idx],
-                "labels": self.labels[idx],
             }
+            if not self.is_test:
+                item["labels"] = self.labels[idx]
+            return item
 
     train_split, val_split = train_test_split(
         train_df, test_size=0.1, random_state=SEED
@@ -106,6 +111,9 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
     )
     val_loader = DataLoader(
         EmotionDataset(val_split), batch_size=batch_size, num_workers=2
+    )
+    test_loader = DataLoader(
+        EmotionDataset(test_df, is_test=True), batch_size=batch_size, num_workers=2
     )
 
     model = AutoModelForSequenceClassification.from_pretrained(
@@ -175,6 +183,21 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
 
     print(f"\nBest val ROC-AUC: {best_auc:.4f}")
 
+    model.load_state_dict(best_state)
+    model.eval()
+    test_probs = []
+    with torch.no_grad():
+        for batch in test_loader:
+            input_ids = batch["input_ids"].to(device)
+            attention_mask = batch["attention_mask"].to(device)
+            with torch.cuda.amp.autocast():
+                logits = model(input_ids=input_ids, attention_mask=attention_mask).logits
+            test_probs.append(torch.sigmoid(logits.float()).cpu().numpy())
+    submission = pd.DataFrame(np.vstack(test_probs), columns=emotion_cols)
+    submission.insert(0, "ID", test_df["ID"].values)
+    submission_csv = submission.to_csv(index=False).encode("utf-8")
+    print(f"Built submission for {len(submission)} test rows")
+
     state_buf = io.BytesIO()
     torch.save(best_state, state_buf)
 
@@ -188,16 +211,17 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
     with tarfile.open(fileobj=tar_buf, mode="w") as tar:
         tar.add(tok_dir, arcname=".")
 
-    return state_buf.getvalue(), tar_buf.getvalue(), best_auc
+    return state_buf.getvalue(), tar_buf.getvalue(), submission_csv, best_auc
 
 
 @app.local_entrypoint()
 def main(epochs: int = 3):
-    model_bytes, tokenizer_tar, best_auc = train.remote(epochs=epochs)
+    model_bytes, tokenizer_tar, submission_csv, best_auc = train.remote(epochs=epochs)
 
     out_dir = Path("deliverable_folder")
     out_dir.mkdir(exist_ok=True)
     (out_dir / "model_best.pth").write_bytes(model_bytes)
+    (out_dir / "submission.csv").write_bytes(submission_csv)
 
     tok_out = out_dir / "tokenizer"
     tok_out.mkdir(exist_ok=True)
@@ -206,3 +230,4 @@ def main(epochs: int = 3):
 
     print(f"Saved deliverable_folder/model_best.pth  (val ROC-AUC={best_auc:.4f})")
     print(f"Saved deliverable_folder/tokenizer/")
+    print(f"Saved deliverable_folder/submission.csv")
