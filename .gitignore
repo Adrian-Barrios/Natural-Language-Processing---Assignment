@@ -1,0 +1,12 @@
+# Trained model checkpoints (too large for GitHub; produced by modal_train_bert.py)
+deliverable_folder/model_best.pth
+*.pth
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
+# OS / IDE
+.DS_Store
+.ipynb_checkpoints/
