@@ -142,6 +142,8 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
 
     best_auc = 0.0
     best_state = None
+    history = {"epoch": [], "train_loss": [], "val_auc": []}
+
     for epoch in range(1, epochs + 1):
         model.train()
         total_loss = 0.0
@@ -175,6 +177,10 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
                 targets.append(batch["labels"].numpy())
         auc = roc_auc_score(np.vstack(targets), np.vstack(preds), average="macro")
         print(f"Epoch {epoch:02d} | loss {train_loss:.4f} | val ROC-AUC {auc:.4f}")
+
+        history["epoch"].append(epoch)
+        history["train_loss"].append(train_loss)
+        history["val_auc"].append(auc)
 
         if auc > best_auc:
             best_auc = auc
@@ -211,12 +217,18 @@ def train(epochs: int = 3, max_len: int = 128, batch_size: int = 32, lr: float =
     with tarfile.open(fileobj=tar_buf, mode="w") as tar:
         tar.add(tok_dir, arcname=".")
 
-    return state_buf.getvalue(), tar_buf.getvalue(), submission_csv, best_auc
+    import json
+    history_bytes = json.dumps(history).encode("utf-8")
+
+    return state_buf.getvalue(), tar_buf.getvalue(), submission_csv, best_auc, history_bytes
 
 
 @app.local_entrypoint()
 def main(epochs: int = 3):
-    model_bytes, tokenizer_tar, submission_csv, best_auc = train.remote(epochs=epochs)
+    import json
+    import matplotlib.pyplot as plt
+
+    model_bytes, tokenizer_tar, submission_csv, best_auc, history_bytes = train.remote(epochs=epochs)
 
     out_dir = Path("deliverable_folder")
     out_dir.mkdir(exist_ok=True)
@@ -228,6 +240,30 @@ def main(epochs: int = 3):
     with tarfile.open(fileobj=io.BytesIO(tokenizer_tar), mode="r") as tar:
         tar.extractall(tok_out)
 
+    history = json.loads(history_bytes)
+    (out_dir / "training_history.json").write_text(json.dumps(history, indent=2))
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(10, 4))
+    ax1.plot(history["epoch"], history["train_loss"], marker="o", color="steelblue")
+    ax1.set_title("Training Loss per Epoch")
+    ax1.set_xlabel("Epoch")
+    ax1.set_ylabel("BCE Loss")
+    ax1.set_xticks(history["epoch"])
+
+    ax2.plot(history["epoch"], history["val_auc"], marker="o", color="darkorange")
+    ax2.set_title("Validation ROC-AUC per Epoch")
+    ax2.set_xlabel("Epoch")
+    ax2.set_ylabel("Macro ROC-AUC")
+    ax2.set_xticks(history["epoch"])
+
+    fig.suptitle("DistilBERT Fine-tuning — Training Curves", fontweight="bold")
+    fig.tight_layout()
+    plot_path = out_dir / "training_curves.png"
+    fig.savefig(plot_path, dpi=150)
+    plt.close(fig)
+
     print(f"Saved deliverable_folder/model_best.pth  (val ROC-AUC={best_auc:.4f})")
     print(f"Saved deliverable_folder/tokenizer/")
     print(f"Saved deliverable_folder/submission.csv")
+    print(f"Saved deliverable_folder/training_curves.png")
+    print(f"Saved deliverable_folder/training_history.json")
